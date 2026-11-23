@@ -1,0 +1,41 @@
+# inkengine
+
+Custom inference engine for **Inkling 2 Mini** (looped MoE, native NVFP4+MXFP8).
+Week 0: a bit-exact C++ dequant anchor generated from `loopkit`.
+
+## Decision: fork llama.cpp, don't greenfield
+
+On Kaggle T4 (sm_75, no FP4/FP8 tensor cores) llama.cpp's ggml path already sits
+at the HBM bandwidth ceiling for decode. A greenfield engine would spend its time
+re-deriving MoE/attention/TP and arrive at parity with nothing left to verify.
+The genuinely new work is loop-specific and additive:
+
+- **RORET** — route once, keep expert tiles resident across the 3 loop passes
+  (gamma starts at 0, so routing is likely stable).
+- **PIBS** — pass-interleaved batching: fold `(token, pass)` pairs into one GEMM,
+  M = batch × 3 instead of batch.
+- **ODSL** — dequant to FP16 WMMA with a block-major scale plane and an FP32
+  side-lane for outlier dimension 2027.
+
+See [docs/ENGINE_SPEC.md](docs/ENGINE_SPEC.md) and
+[docs/ENGINE_RISK.md](docs/ENGINE_RISK.md).
+
+## Week 0 — bit-exact anchor (this repo)
+
+The C++ dequant path must be **bitwise identical** to Python `loopkit`.
+LUTs and 16,000 test values are generated from loopkit, not hand-typed:
+
+```bash
+PYTHONPATH=/tmp/build/loopkit/src python3 tools/gen_vectors.py
+cmake -S . -B build && cmake --build build -j
+ctest --test-dir build --output-on-failure
+```
+
+This checks signed zero, the 16-level E2M1 codebook, and the E4M3 block scale
+byte-for-byte. No speed claims yet.
+
+## Honesty
+
+T4 has no FP4/FP8 tensor cores; FP4 is a storage win there, not a speed win.
+All speed claims must be verified with `loopkit`'s CycleAudit and must be below
+its 95% lower confidence bound.
