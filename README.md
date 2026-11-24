@@ -3,6 +3,13 @@
 Custom inference engine for **Inkling 2 Mini** (looped MoE, native NVFP4+MXFP8).
 Week 0: a bit-exact C++ dequant anchor generated from `loopkit`.
 
+> **Source fact-check (2026-11-24).** Upstream llama.cpp already provides the Inkling2 looped graph
+> and converter (`LLM_ARCH_INKLING2_LOOP`, `src/models/inkling2-loop.cpp`, `src/models/inkling2.cpp`,
+> `conversion/inkling2.py`) with cache slots
+> `n_slot = n_phys + (n_passes-1)*(core_end-core_start)` and rank-r gain/forget loop controllers
+> (`LLM_TENSOR_LOOP_Q_CTRL_*` etc., rank 64). This fork's contribution is union-resident MoE
+> routing on top of upstream, not building the loop graph from scratch.
+
 ## Decision: fork llama.cpp, don't greenfield
 
 On Kaggle T4 (sm_75, no FP4/FP8 tensor cores) llama.cpp's ggml path already sits
@@ -11,11 +18,12 @@ re-deriving MoE/attention/TP and arrive at parity with nothing left to verify.
 The genuinely new work is loop-specific and additive:
 
 - **RORET** — route once, keep expert tiles resident across the 3 loop passes
-  (gamma starts at 0, so routing is likely stable).
+  (in our simplified local model `gamma` starts at 0, so routing is likely stable; upstream gate
+   is rank-r gain/forget controllers, not a scalar gamma).
 - **PIBS** — pass-interleaved batching: fold `(token, pass)` pairs into one GEMM,
   M = batch × 3 instead of batch.
 - **ODSL** — dequant to FP16 WMMA with a block-major scale plane and an FP32
-  side-lane for outlier dimension 2027.
+  side-lane for outlier dimension 2027 **[unverified local hypothesis; not in primary sources]**.
 
 See [docs/ENGINE_SPEC.md](docs/ENGINE_SPEC.md) and
 [docs/ENGINE_RISK.md](docs/ENGINE_RISK.md).
