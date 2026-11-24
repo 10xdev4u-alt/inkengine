@@ -32,7 +32,14 @@ ctest --test-dir build --output-on-failure
 ```
 
 This checks signed zero, the 16-level E2M1 codebook, and the E4M3 block scale
-byte-for-byte. No speed claims yet.
+byte-for-byte. The MXFP8 anchor covers the other native format: each 32-element
+block stores E4M3 codes plus one E8M0 exponent byte, and `ink::dequant_mxfp8_block`
+scales by 2^(exp-127). Its 500 blocks are generated from `loopkit`'s
+`quantize_mxfp8`/`dequantize_mxfp8` into `tests/vectors_mxfp8.bin`, alongside a
+constexpr E4M3 table in `include/ink_mxfp8.hpp`; the test compares all 16,000
+MXFP8 float32 results bit-for-bit, including signed zeros and clamped exponents.
+Regenerate the LUT headers and both vector files with the same
+`PYTHONPATH=... python3 tools/gen_vectors.py` command above. No speed claims yet.
 
 ## Honesty
 
