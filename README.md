@@ -49,6 +49,26 @@ MXFP8 float32 results bit-for-bit, including signed zeros and clamped exponents.
 Regenerate the LUT headers and both vector files with the same
 `PYTHONPATH=... python3 tools/gen_vectors.py` command above. No speed claims yet.
 
+### Entropy-coded stream reader
+
+`include/ink_codec.hpp` decodes loopkit's `ANSStream` payloads (`codec =
+"deflate-v1"`): `codes` and `scales` are raw zlib streams, and the JSON header
+carries `n`, `n_scales`, `shape`, `block`, and `codec`. The parser is
+hand-written (no JSON dependency); decompression uses `uncompress()` with a
+growable buffer and requires the inflated sizes to match `n` and `n_scales`
+exactly. Unknown codecs, malformed headers, and truncated/undersized payloads
+are rejected. The reader writes to the output tensor only on success.
+
+The `codec_reader` test checks a fixture generated from `loopkit.ans_encode`
+against the exact codes/scales printed by Python, plus rejection cases. To
+regenerate the fixture after changing the generator:
+
+```bash
+PYTHONPATH=/tmp/build/loopkit/src python3 tools/make_codec_fixture.py
+cmake -S . -B build && cmake --build build -j
+ctest --test-dir build --output-on-failure
+```
+
 ## Honesty
 
 T4 has no FP4/FP8 tensor cores; FP4 is a storage win there, not a speed win.
