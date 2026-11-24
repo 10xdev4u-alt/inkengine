@@ -40,13 +40,38 @@ ctest --test-dir build --output-on-failure
 ```
 
 This checks signed zero, the 16-level E2M1 codebook, and the E4M3 block scale
-byte-for-byte. The MXFP8 anchor covers the other native format: each 32-element
-block stores E4M3 codes plus one E8M0 exponent byte, and `ink::dequant_mxfp8_block`
-scales by 2^(exp-127). Its 500 blocks are generated from `loopkit`'s
-`quantize_mxfp8`/`dequantize_mxfp8` into `tests/vectors_mxfp8.bin`, alongside a
-constexpr E4M3 table in `include/ink_mxfp8.hpp`; the test compares all 16,000
-MXFP8 float32 results bit-for-bit, including signed zeros and clamped exponents.
-Regenerate the LUT headers and both vector files with the same
+byte-for-byte. The MXFP8 anchor covers the other native format: `ink::dequant_mxfp8_block`
+scales E4M3 codes by 2^(exp-127) from one E8M0 exponent byte. Both constexpr E4M3
+tables live in `include/ink_mxfp8.hpp`, generated from the same loopkit table.
+
+### MXFP8: weights use 2-D tiles, activations use flat blocks
+
+**Verified source fact (2026-11-24):** the shipped Inkling 2 Mini
+[`hf_quant_config.json`](https://huggingface.co/thinkingmachines/Inkling-2-Mini/raw/main/hf_quant_config.json)
+declares `weight_block_shape: [32, 32]` for the MXFP8 expert-weight group
+(layers 20–23), while that same group's `required_activation_quantization`
+declares `block_size: 32`. So one E8M0 exponent covers a **32×32 = 1024-element
+weight tile**, not a flat 32-element run. Treating MXFP8 weights like activations
+gives the wrong scale count and wrong dequantized values. `loopkit` keeps the
+two paths separate: `quantize_mxfp8`/`dequantize_mxfp8` for flat activation blocks
+of 32, `quantize_mxfp8_weights`/`dequantize_mxfp8_weights` for weight tiles
+(`layout="2d"`, scales shaped `(ceil(H/32), ceil(W/32))`).
+
+The generator emits three bit-exact vector files, all compared float32-bit-for-bit
+(including signed zeros and clamped exponents):
+
+| File | Values | Source path |
+| --- | --- | --- |
+| `tests/vectors.bin` | 16,000 (1000 × 16) | `quantize_nvfp4` |
+| `tests/vectors_mxfp8.bin` | 16,000 (500 × 32) | `quantize_mxfp8` (activations, 1-D) |
+| `tests/vectors_mxfp8_2d.bin` | 307,200 (300 × 1024) | `quantize_mxfp8_weights` (2-D tiles) |
+
+The 2-D file starts with a uint32 tile count; each of the 300 tiles then stores
+1024 row-major E4M3 code bytes, one shared E8M0 exponent byte, and 1024 expected
+float32 values; `ink::dequant_mxfp8_tile` takes the codes, the exponent byte and
+a 1024-float output buffer. `test_dequant` prints mismatch counts for `nvfp4`,
+`mxfp8_1d` and `mxfp8_2d` and exits nonzero if any is nonzero (339,200 values
+total). Regenerate the LUT headers and all three vector files with the same
 `PYTHONPATH=... python3 tools/gen_vectors.py` command above. No speed claims yet.
 
 ### Entropy-coded stream reader

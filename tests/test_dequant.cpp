@@ -53,20 +53,34 @@ bool check(const char* path, Dequant<N> dequant, Result& r) {
     return true;
 }
 
+// The 2-D weight path writes into a caller-owned buffer, so give it the same
+// shape as the block dequantizers that return by value.
+std::array<float, 1024> dequant_mxfp8_tile(std::span<const uint8_t, 1024> codes,
+                                           uint8_t exp_code) {
+    std::array<float, 1024> out{};
+    ink::dequant_mxfp8_tile(codes.data(), exp_code, out.data());
+    return out;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
     const char* nvfp4_path = argc > 1 ? argv[1] : "tests/vectors.bin";
     const char* mxfp8_path = argc > 2 ? argv[2] : "tests/vectors_mxfp8.bin";
-    Result nvfp4, mxfp8;
+    const char* tile_path = argc > 3 ? argv[3] : "tests/vectors_mxfp8_2d.bin";
+    Result nvfp4, mxfp8, tile;
     if (!check<16>(nvfp4_path, ink::dequant_block, nvfp4)) return 2;
     if (!check<32>(mxfp8_path, ink::dequant_mxfp8_block, mxfp8)) return 2;
+    if (!check<1024>(tile_path, dequant_mxfp8_tile, tile)) return 2;
 
     std::printf("nvfp4 blocks=%u values=%llu mismatches=%llu\n",
                 nvfp4.blocks, (unsigned long long)nvfp4.values,
                 (unsigned long long)nvfp4.mismatches);
-    std::printf("mxfp8 blocks=%u values=%llu mismatches=%llu\n",
+    std::printf("mxfp8_1d blocks=%u values=%llu mismatches=%llu\n",
                 mxfp8.blocks, (unsigned long long)mxfp8.values,
                 (unsigned long long)mxfp8.mismatches);
-    return (nvfp4.mismatches == 0 && mxfp8.mismatches == 0) ? 0 : 1;
+    std::printf("mxfp8_2d tiles=%u values=%llu mismatches=%llu\n",
+                tile.blocks, (unsigned long long)tile.values,
+                (unsigned long long)tile.mismatches);
+    return (nvfp4.mismatches == 0 && mxfp8.mismatches == 0 && tile.mismatches == 0) ? 0 : 1;
 }

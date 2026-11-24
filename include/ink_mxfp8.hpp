@@ -276,4 +276,15 @@ inline std::array<float, 32> dequant_mxfp8_block(std::span<const uint8_t, 32> co
     return out;
 }
 
+// Bit-exact MXFP8 dequantization of one 32x32 expert-weight tile.
+// `codes` holds 1024 E4M3 bytes in row-major order; `exp_code` is the single
+// E8M0 exponent shared by the whole tile, encoding 2^(exp_code-127).
+// `out` must point to 1024 floats, also row-major.
+inline void dequant_mxfp8_tile(const uint8_t* codes, uint8_t exp_code, float* out) {
+    const float scale = std::ldexp(1.0f, int(exp_code) - 127);
+    for (int i = 0; i < 1024; ++i) {
+        out[i] = kMxfp8E4M3[codes[i]] * scale;
+    }
+}
+
 }  // namespace ink

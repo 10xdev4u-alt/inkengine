@@ -13,8 +13,10 @@ from loopkit.nvfp4 import (
     FP4_LEVELS,
     _E4M3_LUT,
     dequantize_mxfp8,
+    dequantize_mxfp8_weights,
     dequantize_nvfp4,
     quantize_mxfp8,
+    quantize_mxfp8_weights,
     quantize_nvfp4,
 )
 
@@ -82,6 +84,17 @@ inline std::array<float, 32> dequant_mxfp8_block(std::span<const uint8_t, 32> co
     return out;
 }}
 
+// Bit-exact MXFP8 dequantization of one 32x32 expert-weight tile.
+// `codes` holds 1024 E4M3 bytes in row-major order; `exp_code` is the single
+// E8M0 exponent shared by the whole tile, encoding 2^(exp_code-127).
+// `out` must point to 1024 floats, also row-major.
+inline void dequant_mxfp8_tile(const uint8_t* codes, uint8_t exp_code, float* out) {{
+    const float scale = std::ldexp(1.0f, int(exp_code) - 127);
+    for (int i = 0; i < 1024; ++i) {{
+        out[i] = kMxfp8E4M3[codes[i]] * scale;
+    }}
+}}
+
 }}  // namespace ink
 """)
 
@@ -102,4 +115,19 @@ x8[2, :] *= 1e-27  # exercise small/clamped E8M0 exponents
 t8 = quantize_mxfp8(x8)
 expected8 = dequantize_mxfp8(t8).astype(np.float32)
 write_vectors("vectors_mxfp8.bin", 500, t8.codes, t8.scales, expected8, 32)
+
+# 4) bit-exact MXFP8 expert-weight vectors: 300 tiles of one 32x32 E4M3 code
+# plane (1024 bytes) + one shared E8M0 exponent byte + 1024 f32 values, per
+# the checkpoint's weight_block_shape [32, 32] (activations stay flat block 32).
+rng = np.random.default_rng(20261125)
+x2d = rng.standard_normal((300, 32, 32)).astype(np.float32)
+x2d[0, 0, 0] = 0.0
+x2d[0, 0, 1] = -0.0
+x2d[1, 7, 9] = -0.0
+x2d[2] *= 1e-27  # exercise small/clamped E8M0 exponents
+t2 = [quantize_mxfp8_weights(tile) for tile in x2d]
+codes2d = np.stack([t.codes for t in t2])
+scales2d = np.stack([t.scales for t in t2])
+expected2d = np.stack([dequantize_mxfp8_weights(t) for t in t2]).astype(np.float32)
+write_vectors("vectors_mxfp8_2d.bin", 300, codes2d, scales2d, expected2d, 1024)
 print("LUTs generated from loopkit")
